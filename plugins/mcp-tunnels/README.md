@@ -31,7 +31,7 @@ and runs everything else for you:
 4. **Register the CA** (Console) — you upload `ca.crt`; the tunnel goes Active.
 5. **Upstream** — scaffolds a verifiable FastMCP sample server, or wires up an
    MCP server you already have.
-6. **Proxy config + Compose** — writes `mcp-gateway.yaml` and a
+6. **Proxy config + Compose** — writes `mcp-proxy.yaml` and a
    `docker-compose.yaml` with digest-pinned images and the cloudflared agent.
 7. **Start and verify** — brings the stack up and checks the proxy and tunnel
    logs.
@@ -87,7 +87,7 @@ A small container stack on your host:
 
 | Container | Role |
 |---|---|
-| **mcp-gateway** | Anthropic's proxy. Terminates inner TLS with a cert you control, validates upstream IPs, routes by hostname. |
+| **mcp-proxy** | Anthropic's proxy. Terminates inner TLS with a cert you control, validates upstream IPs, routes by hostname. |
 | **cloudflared** | The tunnel agent. Outbound-only to the Anthropic tunnel edge; shares the proxy's network namespace. |
 | **hello-mcp** *(optional)* | A FastMCP sample server, only if you don't have an MCP server to expose yet. |
 

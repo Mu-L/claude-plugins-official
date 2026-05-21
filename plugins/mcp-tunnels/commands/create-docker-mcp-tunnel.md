@@ -29,7 +29,7 @@ default to `./mcp-tunnel`. Refer to it below as `$DIR`.
 
 A container stack on the user's machine:
 
-- **mcp-gateway** — Anthropic's proxy. Terminates the inner TLS handshake using
+- **mcp-proxy** — Anthropic's proxy. Terminates the inner TLS handshake using
   a certificate the user controls, validates upstream IPs, routes by hostname.
 - **cloudflared** — the tunnel agent. Outbound-only connection to the Anthropic
   tunnel edge; shares the proxy's network namespace.
@@ -209,7 +209,7 @@ if __name__ == "__main__":
 
 ## Step 7 — Proxy config
 
-Write `$DIR/config/mcp-gateway.yaml`. `tunnel_domain` is **required** (the
+Write `$DIR/config/mcp-proxy.yaml`. `tunnel_domain` is **required** (the
 proxy strips it from the incoming hostname to find the subdomain in `routes`).
 `routes` is a **flat map** subdomain → upstream URL, *not* a list:
 
@@ -234,10 +234,11 @@ Write `$DIR/docker-compose.yaml`. Images are pinned by digest:
 
 ```yaml
 services:
-  mcp-gateway:
+  mcp-proxy:
     image: us-docker.pkg.dev/anthropic-public-registry/images/mcp-proxy@sha256:6b9adedbf2763143ec72f106ecaf0ce7fd3294e89b208f54a1db97a33d14c5ba
+    command: ["-config", "/etc/mcp-proxy/config.yaml"]
     volumes:
-      - ./config/mcp-gateway.yaml:/etc/mcp-gateway/config.yaml:ro
+      - ./config/mcp-proxy.yaml:/etc/mcp-proxy/config.yaml:ro
       - ./data:/data:ro
     restart: unless-stopped
 
@@ -246,13 +247,13 @@ services:
     command: tunnel --no-autoupdate run --url http://localhost:8080
     environment:
       - TUNNEL_TOKEN
-    network_mode: "service:mcp-gateway"
+    network_mode: "service:mcp-proxy"
     restart: unless-stopped
 ```
 
 `--url http://localhost:8080` is **required** in the manual flow: no ingress
 rules are pushed server-side, so without it cloudflared 503s every request.
-`network_mode: "service:mcp-gateway"` shares the proxy's netns so
+`network_mode: "service:mcp-proxy"` shares the proxy's netns so
 `localhost:8080` reaches it. `environment: - TUNNEL_TOKEN` (no value) passes
 the variable through from `.env`.
 
@@ -281,7 +282,7 @@ this quickstart keeps it minimal for fast local testing.)
 ```bash
 cd "$DIR" && docker compose up -d
 sleep 5
-docker compose logs mcp-gateway | grep -i "route configured"
+docker compose logs mcp-proxy | grep -i "route configured"
 docker compose logs cloudflared | grep -i "Registered tunnel connection"
 ```
 
@@ -327,11 +328,11 @@ it the same as for any other MCP server.
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| Caller sees HTTP 500; cloudflared logs `No ingress rules were defined` | cloudflared has no local target | Ensure `--url http://localhost:8080` and `network_mode: "service:mcp-gateway"` are both present, then `docker compose up -d` |
+| Caller sees HTTP 500; cloudflared logs `No ingress rules were defined` | cloudflared has no local target | Ensure `--url http://localhost:8080` and `network_mode: "service:mcp-proxy"` are both present, then `docker compose up -d` |
 | Proxy exits `cannot unmarshal !!seq into map[string]string` | `routes` written as a YAML list | Use `routes: { name: http://host:port }`, not a list of objects |
 | Proxy exits `open /data/tls.key: permission denied` | key is `0600`, proxy runs non-root | `chmod 644 data/tls.key` |
 | Proxy logs `no route for host` (caller gets `502 No route configured for host`) | `tunnel_domain` missing or wrong | Set it to the exact domain on the tunnel detail page; then **restart the proxy** (next row) |
-| Edited config but nothing changed | proxy does **not** hot-reload `config.yaml` (only `tls.cert_file`) | `docker compose restart mcp-gateway` — `up -d` alone won't recreate it on a file-content change |
+| Edited config but nothing changed | proxy does **not** hot-reload `config.yaml` (only `tls.cert_file`) | `docker compose restart mcp-proxy` — `up -d` alone won't recreate it on a file-content change |
 | `tls handshake failed ... unknown certificate authority` | CA not registered/revoked on this tunnel | Re-upload `data/ca.crt` in the Console (Step 5) |
 | `tls handshake failed ... bad certificate` | server cert SAN ≠ `*.<tunnel-domain>`, or expired | Regenerate the server cert (Step 4) with the correct `TUNNEL_DOMAIN` |
 | `IP validation failed: <ip> is not a private address` | upstream resolves outside RFC1918 (e.g. `127.0.0.1`, public IP) | Run the upstream as a Compose service on the proxy's network; or narrow `upstream.allowed_ips` deliberately (avoid `0.0.0.0/0` outside local testing) |
@@ -341,7 +342,7 @@ it the same as for any other MCP server.
 | `curl https://<proxy>:8080` fails `wrong version number` | expected — listener is plaintext WS, TLS is inside the WS stream | Don't curl the proxy directly; verify via Managed Agent or Messages API |
 
 `docker compose logs cloudflared` (token/edge reachability) and
-`docker compose logs mcp-gateway` (config/cert/routing) are the two primary
+`docker compose logs mcp-proxy` (config/cert/routing) are the two primary
 diagnostics. Check the outbound connection first, then the inner TLS handshake,
 then upstream routing. See
 [Troubleshooting](https://platform.claude.com/docs/en/agents-and-tools/mcp-tunnels/troubleshooting)
@@ -355,7 +356,7 @@ for additional cases.
 - **Cert renewal:** the server cert is valid 90 days. Re-sign with the same CA
   (the registered CA doesn't change) and replace `data/tls.crt`; the proxy
   polls and reloads it, no restart needed.
-- **Config changes always need** `docker compose restart mcp-gateway`.
+- **Config changes always need** `docker compose restart mcp-proxy`.
 
 ## Wrap up
 
